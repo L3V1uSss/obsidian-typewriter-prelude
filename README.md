@@ -49,9 +49,10 @@ This version is a native adaptation for Obsidian and CodeMirror 6. It does not r
 - Synthesized key clicks, platen thumps, metallic ring, carriage return, and margin bell with room response and stereo panning; immediate IME keystroke audio without duplicate Space triggers; plus a vintage telegraph sound effect[cite: 9]
 
 ### ScreenShots
-  <img width="955" height="1057" alt="屏幕截图 2026-11-27 185320" src="https://github.com/user-attachments/assets/2187b903-7f81-49df-af4d-c8376007158b" />
-  <img width="947" height="1062" alt="屏幕截图 2026-11-27 185443" src="https://github.com/user-attachments/assets/7a099aef-2a93-40aa-8fd1-496d3a92e265" />
-  <img width="945" height="1072" alt="屏幕截图 2026-11-27 185525" src="https://github.com/user-attachments/assets/5b195da3-e0e5-4947-a7ff-19640de98561" />
+  <img width="952" height="1065" alt="屏幕截图 2026-11-27 192524" src="https://github.com/user-attachments/assets/6c1eb455-a670-4af8-a36c-69cb9ff46b6c" />
+  <img width="942" height="1072" alt="屏幕截图 2026-11-27 192548" src="https://github.com/user-attachments/assets/9e8b3194-d878-424f-bcef-529d84dc2e01" />
+  <img width="948" height="1066" alt="屏幕截图 2026-11-27 192559" src="https://github.com/user-attachments/assets/f88d873c-28aa-4441-9fde-216c3f4dc0a3" />
+
 
 
 ### Installation & Usage

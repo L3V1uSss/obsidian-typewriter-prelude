@@ -1,7 +1,7 @@
 {
-  "id": "typewriter-prelude-test",
-  "name": "Typewriter Prelude Test",
-  "version": "1.0.1",
+  "id": "typewriter-prelude",
+  "name": "Typewriter Prelude",
+  "version": "1.1.1",
   "minAppVersion": "1.5.0",
   "description": "A typewriter-inspired writing environment with a live 3D machine model, procedural paper, synthesized sounds and dynamic light.",
   "author": "Lev1uS",

@@ -1,6 +1,6 @@
 {
-  "name": "typewriter-prelude-obsidian",
-  "version": "1.0.0",
+  "name": "typewriter-prelude",
+  "version": "1.1.1",
   "private": true,
   "scripts": {
     "build:machine": "esbuild src/machine/entry.js --bundle --platform=browser --format=cjs --target=es2020 --legal-comments=inline --outfile=machine-bundle.js",

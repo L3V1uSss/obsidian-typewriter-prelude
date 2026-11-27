@@ -7,7 +7,7 @@
   "room": "paper-and-ink",
   "sound": true,
   "volume": 23,
-  "voice": "telegraph",
+  "voice": "standard",
   "telegraphWpm": 26,
   "telegraphInterrupt": false,
   "lighting": true,

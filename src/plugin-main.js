@@ -5,20 +5,21 @@ const { GlowLayer } = require('./glow-layer.js');
 const { PaperLight } = require('./paper-light.js');
 
 const DEFAULT_SETTINGS = {
-  enabled: false,
+  enabled: true,
   cursorPosition: 72,
-  paper: 'parchment',
+  paper: 'onionskin',
   filterStyle: 'clean',
-  filterStrength: 300,
+  filterStrength: 299,
   room: 'paper-and-ink',
   sound: true,
-  volume: 42,
-  voice: 'standard',
+  volume: 30,
+  voice: 'whisper',
   telegraphWpm: 26,
   telegraphInterrupt: false,
-  lighting: true,
+  lighting: false,
   lightSource: 'carriage',
-  lightIntensity: 84,
+  readingLightSource: 'desk-lamp',
+  lightIntensity: 80,
   dust: true,
   focusLine: false,
   reducedMotion: false
@@ -103,8 +104,8 @@ function setPaperFilterStyle(element, style) {
   element.dataset.filterStyle = style === 'hokkaido-blue-hour' ? 'hokkaido-blue-hour' : 'clean';
 }
 
-function machineLayout(width, height) {
-  const machineHeight = clamp(height * .3, 160, 300);
+function machineLayout(width, height, readingMode = false) {
+  const machineHeight = readingMode ? 0 : clamp(height * .3, 160, 300);
   const margins = width < 720 ? 40 : 2 * clamp(width * .04, 18, 64);
   const narrowest = Math.round(Math.max(160, Math.min(width - margins, 1240)));
   const margin = Math.round((width - narrowest) / 2);
@@ -114,12 +115,12 @@ function machineLayout(width, height) {
   const sheetX = platen.left;
   const machineTop = height - machineHeight;
   const platenRadius = machineHeight * .12;
-  const platenY = machineTop + machineHeight * .24;
-  const bailY = machineTop + machineHeight * .08;
+  const platenY = readingMode ? height : machineTop + machineHeight * .24;
+  const bailY = readingMode ? height : machineTop + machineHeight * .08;
   return {
     width,
     height,
-    machine: true,
+    machine: !readingMode,
     machineHeight,
     machineTop,
     sheet: { x: sheetX, y: -12, width: sheetWidth, height: Math.ceil(platenY + 12) },
@@ -130,7 +131,7 @@ function machineLayout(width, height) {
     bailY,
     headRailY: platenY + platenRadius * 1.35,
     lampY: bailY + 12,
-    text: { x: sheetX, y: 0, width: sheetWidth, height: Math.max(80, Math.round(bailY - 16)) }
+    text: { x: sheetX, y: 0, width: sheetWidth, height: readingMode ? height : Math.max(80, Math.round(bailY - 16)) }
   };
 }
 const random = (seed) => { let x = seed >>> 0; return () => { x += 0x6D2B79F5; let t = x; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
@@ -230,6 +231,8 @@ class TypewriterNocturnePlugin extends Plugin {
       this.settings.cursorPosition = DEFAULT_SETTINGS.cursorPosition;
     }
     this.stages = new Map();
+    this.stageCache = new Map();
+    this.lampButtons = new Map();
     this.frames = new Set();
     this.alignmentScheduled = false;
     this.pendingCaretRecenter = false;
@@ -242,7 +245,8 @@ class TypewriterNocturnePlugin extends Plugin {
     this.addCommand({ id: 'toggle-nocturne-sound', name: '切换机械打字音效', callback: () => this.toggleSound() });
     this.addCommand({ id: 'toggle-nocturne-focus', name: '切换当前行聚焦', callback: () => this.toggleFocus() });
     this.addCommand({ id: 'nocturne-recenter-cursor', name: '将光标移回打字机位置', callback: () => this.scheduleCursorSync(true) });
-    this.addSettingTab(new TypewriterSettingTab(this.app, this));
+    this.settingTab = new TypewriterSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     this.status = this.addStatusBarItem();
     this.status.addClass('tn-status-clickable');
@@ -275,8 +279,15 @@ class TypewriterNocturnePlugin extends Plugin {
   onunload() {
     for (const id of this.frames) cancelAnimationFrame(id);
     this.frames.clear();
-    for (const stage of this.stages.values()) stage.destroy();
+    for (const pair of this.stageCache.values()) {
+      if (pair.edit) pair.edit.destroy();
+      if (pair.reading) pair.reading.destroy();
+    }
+    this.stageCache.clear();
     this.stages.clear();
+    document.querySelectorAll('.tn-view-active').forEach(el => el.classList.remove('tn-view-active'));
+    for (const btn of this.lampButtons.values()) btn.remove();
+    this.lampButtons.clear();
     this.audio.destroy();
     document.querySelectorAll('.tn-nocturne-active').forEach(el => el.classList.remove('tn-nocturne-active', 'tn-focus-line'));
   }
@@ -285,6 +296,9 @@ class TypewriterNocturnePlugin extends Plugin {
     await this.saveData(this.settings);
     this.refreshViews();
     this.updateStatus();
+    if (this.settingTab && this.settingTab.lightingToggle && this.settingTab.containerEl && this.settingTab.containerEl.isConnected) {
+      this.settingTab.lightingToggle.setValue(this.settings.lighting);
+    }
   }
 
   applyPaperFilter() {
@@ -310,7 +324,7 @@ class TypewriterNocturnePlugin extends Plugin {
 
   async toggleLamp() {
     this.settings.lighting = !this.settings.lighting;
-    this.audio.play('switch', false, this.activeStage()?.pan() || 0);
+    try { this.audio.play('switch', false, this.activeStage()?.pan() || 0); } catch (_) {}
     await this.saveSettings();
   }
 
@@ -341,25 +355,69 @@ class TypewriterNocturnePlugin extends Plugin {
     return leaf ? this.stages.get(leaf) || null : null;
   }
 
+  syncLampButton(leaf) {
+    if (!leaf || !leaf.view || typeof leaf.view.addAction !== 'function') return;
+    let btn = this.lampButtons.get(leaf);
+    if (!btn || !btn.isConnected) {
+      btn = leaf.view.addAction('lightbulb', '切换灯光', () => this.toggleLamp());
+      btn.addClass('tn-lamp-action');
+      this.lampButtons.set(leaf, btn);
+    }
+    const isOn = this.settings.enabled && this.settings.lighting;
+    btn.toggleClass('is-active', isOn);
+    btn.setAttr('aria-label', isOn ? '关闭灯光' : '开启灯光');
+    btn.style.display = this.settings.enabled ? '' : 'none';
+  }
+
   refreshViews() {
     const leaves = this.getMarkdownLeaves();
     const alive = new Set(leaves);
-    for (const [leaf, stage] of this.stages) {
+    for (const [leaf, pair] of this.stageCache) {
       if (!alive.has(leaf) || !leaf.view || !leaf.view.containerEl.isConnected) {
-        stage.destroy(); this.stages.delete(leaf);
+        if (pair.edit) pair.edit.destroy();
+        if (pair.reading) pair.reading.destroy();
+        this.stageCache.delete(leaf);
+        this.stages.delete(leaf);
       }
     }
+    for (const [leaf, btn] of this.lampButtons) {
+      if (!alive.has(leaf) || !leaf.view || !leaf.view.containerEl.isConnected) {
+        btn.remove(); this.lampButtons.delete(leaf);
+      }
+    }
+    const room = ROOMS[this.settings.room] || ROOMS['paper-and-ink'];
+    const paper = PAPERS[this.settings.paper] || PAPERS.parchment;
     for (const leaf of leaves) {
       if (!leaf.view || !leaf.view.containerEl) continue;
-      const source = leaf.view.containerEl.querySelector('.markdown-source-view');
-      const editor = source && source.querySelector('.cm-editor');
-      if (!source || !editor) continue;
-      let stage = this.stages.get(leaf);
-      if (!stage || stage.source !== source || stage.editor !== editor) {
-        if (stage) stage.destroy();
-        stage = new NocturneStage(this, leaf, source, editor);
-        this.stages.set(leaf, stage);
+      this.syncLampButton(leaf);
+      const host = leaf.view.containerEl;
+      host.classList.toggle('tn-view-active', this.settings.enabled);
+      if (this.settings.enabled) {
+        host.style.setProperty('--tn-room', room.room);
+        host.style.setProperty('--tn-paper', paper.color);
+        host.style.setProperty('--tn-ink', paper.ink);
       }
+      const isReading = typeof leaf.view.getMode === 'function' && leaf.view.getMode() === 'preview';
+      const modeKey = isReading ? 'reading' : 'edit';
+      const otherKey = isReading ? 'edit' : 'reading';
+      let pair = this.stageCache.get(leaf);
+      if (!pair) { pair = { edit: null, reading: null }; this.stageCache.set(leaf, pair); }
+      if (pair[otherKey]) pair[otherKey].setActive(false);
+      const source = isReading
+        ? host.querySelector('.markdown-reading-view')
+        : host.querySelector('.markdown-source-view');
+      const editor = isReading
+        ? source && source.querySelector('.markdown-preview-view')
+        : source && source.querySelector('.cm-editor');
+      if (!source || !editor) continue;
+      let stage = pair[modeKey];
+      if (!stage || stage.destroyed || stage.source !== source || stage.editor !== editor) {
+        if (stage) stage.destroy();
+        stage = new NocturneStage(this, leaf, source, editor, isReading);
+        pair[modeKey] = stage;
+      }
+      stage.setActive(true);
+      this.stages.set(leaf, stage);
       stage.update(this.settings);
     }
     this.updateStatus();
@@ -480,11 +538,13 @@ class TypewriterNocturnePlugin extends Plugin {
 }
 
 class NocturneStage {
-  constructor(plugin, leaf, source, editor) {
+  constructor(plugin, leaf, source, editor, isReading = false) {
     this.plugin = plugin;
     this.leaf = leaf;
     this.source = source;
     this.editor = editor;
+    this.isReading = isReading;
+    this.active = true;
     this.destroyed = false;
     this.paperCanvas = document.createElement('canvas');
     this.paperCanvas.className = 'tn-paper-layer';
@@ -508,7 +568,8 @@ class NocturneStage {
     });
     this.glowLayer = new GlowLayer(this.lightCanvas);
     this.source.classList.add('tn-nocturne-active');
-    const cm = plugin.getCM(leaf.view);
+    this.source.classList.toggle('tn-reading-mode', this.isReading);
+    const cm = this.isReading ? null : plugin.getCM(leaf.view);
     this.scrollDOM = cm && cm.scrollDOM;
     this.scrollHandler = () => plugin.scheduleCursorSync(false);
     if (this.scrollDOM) this.scrollDOM.addEventListener('scroll', this.scrollHandler, { passive: true });
@@ -516,6 +577,15 @@ class NocturneStage {
     this.resizeObserver.observe(this.editor);
     this.resize();
     this.update(plugin.settings);
+  }
+
+  setActive(active) {
+    this.active = active;
+    if (!active) {
+      if (this.dustFrame) { cancelAnimationFrame(this.dustFrame); this.dustFrame = 0; }
+      if (this.cursorFrame) { cancelAnimationFrame(this.cursorFrame); this.cursorFrame = 0; }
+      if (this.railFrame) { cancelAnimationFrame(this.railFrame); this.railFrame = 0; }
+    }
   }
 
   update(settings) {
@@ -543,8 +613,9 @@ class NocturneStage {
   }
 
   resize() {
-    if (this.destroyed) return;
+    if (this.destroyed || !this.active) return;
     const rect = this.editor.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return;
     const sourceRect = this.source.getBoundingClientRect();
     const offsetX = rect.left - sourceRect.left;
     const offsetY = rect.top - sourceRect.top;
@@ -555,8 +626,8 @@ class NocturneStage {
     this.renderRatio = ratio;
     for (const canvas of [this.paperCanvas, this.lightCanvas, this.railCanvas]) {
       if (canvas !== this.paperCanvas || !this.paperLight) {
-        canvas.width = w;
-        canvas.height = h;
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
       }
       canvas.style.left = `${offsetX}px`;
       canvas.style.top = `${offsetY}px`;
@@ -570,7 +641,7 @@ class NocturneStage {
     this.machineCanvas.style.bottom = 'auto';
     this.machineCanvas.style.width = `${rect.width}px`;
     this.machineCanvas.style.height = `${rect.height}px`;
-    this.machineLayout = machineLayout(rect.width, rect.height);
+    this.machineLayout = machineLayout(rect.width, rect.height, this.isReading);
     this.source.style.setProperty('--tn-machine-height', `${this.machineLayout.machineHeight}px`);
     const paperLeft = clamp(this.machineLayout.sheet.x, 0, rect.width);
     const paperRight = clamp(this.machineLayout.sheet.x + this.machineLayout.sheet.width, paperLeft, rect.width);
@@ -588,7 +659,7 @@ class NocturneStage {
   }
 
   configureMachine() {
-    if (!this.plugin.settings.enabled || !this.machineLayout) return;
+    if (this.isReading || !this.plugin.settings.enabled || !this.machineLayout) return;
     this.ensureMachineRenderer();
     if (!this.machineRenderer) return;
     const settings = this.plugin.settings;
@@ -632,6 +703,9 @@ class NocturneStage {
       paper: { color: paper.color, appearance: paper.dark ? 'dark' : 'light' },
       serif
     };
+    const machineKey = JSON.stringify(spec);
+    if (this.machineReady && this.machineSpecKey === machineKey) return;
+    this.machineSpecKey = machineKey;
     this.machineCanvas.style.visibility = 'hidden';
     this.machineReady = false;
     try {
@@ -644,7 +718,7 @@ class NocturneStage {
   }
 
   ensureMachineRenderer() {
-    if (this.machineAttempted || !this.plugin.settings.enabled) return;
+    if (this.isReading || this.machineAttempted || !this.plugin.settings.enabled) return;
     this.machineAttempted = true;
     try {
       this.machineRenderer = createMachine(this.machineCanvas, () => {
@@ -710,9 +784,13 @@ class NocturneStage {
     const filterAmount = settings.filterStyle === 'hokkaido-blue-hour' ? strength / 500 : 0;
     const blueTint = toUnit('#a9c1ed');
     const lampColor = toUnit(room.lamp).map((value, index) => value * (1 - filterAmount) + blueTint[index] * filterAmount);
-    const source = settings.lightSource === 'theme' ? room.source : settings.lightSource;
-    const position = settings.lightSource === 'theme'
-      ? room.position
+    const requestedSource = this.isReading ? (settings.readingLightSource || 'theme') : settings.lightSource;
+    let source = requestedSource === 'theme' ? room.source : requestedSource;
+    if (this.isReading && source === 'carriage') source = 'desk-lamp';
+    const roomFallbackSource = this.isReading && room.source === 'carriage' ? 'desk-lamp' : room.source;
+    const roomFallbackPosition = this.isReading && room.source === 'carriage' ? ROOMS['midnight-study'].position : room.position;
+    const position = requestedSource === 'theme'
+      ? roomFallbackPosition
       : source === 'desk-lamp'
         ? ROOMS['midnight-study'].position
         : source === 'moonlight'
@@ -720,7 +798,7 @@ class NocturneStage {
           : ROOMS['paper-and-ink'].position;
     const intensity = settings.lighting ? clamp(settings.lightIntensity, 0, 100) / 100 : 0;
     const rig = buildRig({
-      source: settings.lightSource,
+      source: this.isReading ? source : requestedSource,
       position,
       intensity,
       spread: 74,
@@ -729,7 +807,7 @@ class NocturneStage {
       reach: 1,
       window: { x: .5, y: .38, columns: 3, rows: 2, slant: 0 }
     }, {
-      light: { source: room.source, position: room.position }
+      light: { source: roomFallbackSource, position: roomFallbackPosition }
     }, {
       width: rect.width,
       height: rect.height,
@@ -748,11 +826,12 @@ class NocturneStage {
       paper.dark ? .62 : .55
     );
     const shade = room.shade * strength / 300;
-    const ambient = clamp(1 - shade * (.55 + .45 * intensity), floor, 1);
+    const shadeIntensity = clamp(settings.lightIntensity, 0, 100) / 100;
+    const ambient = clamp(1 - shade * (.55 + .45 * shadeIntensity), floor, 1);
     const frame = {
       rig,
-      lamp: settings.enabled && settings.lighting,
-      tint: lampColor,
+      lamp: settings.enabled,
+      tint: settings.lighting ? lampColor : [0, 0, 0],
       ambient,
       ambientTint,
       relief: 1,
@@ -797,7 +876,7 @@ class NocturneStage {
       platenTurn: this.platenTurn,
       lamp: settings.enabled && settings.lighting && source === 'carriage',
       lighting: settings.enabled && settings.lighting,
-      intensity: settings.lightIntensity / 100
+      intensity: settings.lighting ? settings.lightIntensity / 100 : 0
     });
   }
 
@@ -807,7 +886,7 @@ class NocturneStage {
     const height=this.machineLayout?this.machineLayout.height:this.editor.clientHeight;
     const ratio=this.renderRatio||1;
     ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,this.railCanvas.width,this.railCanvas.height);
-    if(!this.plugin.settings.enabled||width<80||height<40)return;
+    if(this.isReading||!this.plugin.settings.enabled||width<80||height<40){this.machineCanvas.style.visibility='hidden';return;}
     if(this.machineRenderer&&this.machineReady){
       const rendered=this.renderMachine();
       this.machineCanvas.style.visibility=rendered?'visible':'hidden';
@@ -875,18 +954,21 @@ class NocturneStage {
       ctx.fillStyle='#31373a';ctx.beginPath();ctx.arc(carriageX+side*19,y-3,1.2,0,Math.PI*2);ctx.fill();
     }
     ctx.fillStyle='#8a2924';ctx.fillRect(carriageX-11,y+8,22,3);
-    const bulb=ctx.createRadialGradient(carriageX,bulbY,0,carriageX,bulbY,11+pulse*5);
-    bulb.addColorStop(0,'rgba(255,246,211,.95)');bulb.addColorStop(.22,`${room.lamp}d9`);bulb.addColorStop(1,`${room.lamp}00`);
-    ctx.fillStyle=bulb;ctx.fillRect(carriageX-16,bulbY-16,32,32);
-    ctx.fillStyle='#fff4d0';ctx.beginPath();ctx.arc(carriageX,bulbY,2.4,0,Math.PI*2);ctx.fill();
+    if(railSettings.lighting){
+      const bulb=ctx.createRadialGradient(carriageX,bulbY,0,carriageX,bulbY,11+pulse*5);
+      bulb.addColorStop(0,'rgba(255,246,211,.95)');bulb.addColorStop(.22,`${room.lamp}d9`);bulb.addColorStop(1,`${room.lamp}00`);
+      ctx.fillStyle=bulb;ctx.fillRect(carriageX-16,bulbY-16,32,32);
+      ctx.fillStyle='#fff4d0';ctx.beginPath();ctx.arc(carriageX,bulbY,2.4,0,Math.PI*2);ctx.fill();
+    }
     ctx.restore();
   }
 
   syncDustAnimation() {
     if (this.dustFrame) cancelAnimationFrame(this.dustFrame);
     this.dustFrame = 0;
+    if (!this.active) return;
     const tick = (now) => {
-      if (this.destroyed) return;
+      if (this.destroyed || !this.active) return;
       const s=this.plugin.settings;
       if (!(s.enabled && s.lighting && s.dust && !s.reducedMotion)) return;
       if (!this.lastDust || now-this.lastDust>40) { this.lastDust=now; this.renderLight(); }
@@ -952,10 +1034,11 @@ class NocturneStage {
     if(this.cursorFrame)cancelAnimationFrame(this.cursorFrame);
     if(this.scrollDOM)this.scrollDOM.removeEventListener('scroll',this.scrollHandler);
     if(this.railFrame)cancelAnimationFrame(this.railFrame);
+    if(this.dustFrame)cancelAnimationFrame(this.dustFrame);
     if(this.machineRenderer)this.machineRenderer.dispose();
     if(this.paperLight)this.paperLight.dispose();
     for(const el of [this.paperCanvas,this.lightCanvas,this.railCanvas,this.machineCanvas])el.remove();
-    this.source.classList.remove('tn-nocturne-active','tn-focus-line','tn-mode-off','tn-paper-dark');
+    this.source.classList.remove('tn-nocturne-active','tn-reading-mode','tn-focus-line','tn-mode-off','tn-paper-dark');
     delete this.source.dataset.paper; delete this.source.dataset.room; delete this.source.dataset.filterStyle;
     for(const v of ['--tn-paper','--tn-ink','--tn-accent','--tn-room','--tn-metal','--tn-light-color','--tn-filter-wash-alpha','--tn-filter-center-alpha','--tn-filter-vignette-alpha','--tn-filter-edge-alpha','--tn-filter-top-alpha','--tn-filter-bottom-alpha','--tn-machine-height','--tn-editor-paper-left','--tn-editor-paper-right','--tn-paper-text-height','--tn-paper-tail-height'])this.source.style.removeProperty(v);
   }
@@ -1357,7 +1440,7 @@ class TypewriterAudio {
 
 class TypewriterSettingTab extends PluginSettingTab {
   constructor(app,plugin){super(app,plugin);this.plugin=plugin;}
-  display(){const c=this.containerEl;c.empty();c.createEl('h2',{text:'Typewriter Prelude · 机械滑轨写作环境'});c.createEl('p',{text:'将纸张材质、光标跟随的机械滑轨、动态灯光与合成音效带入 Obsidian。所有效果均在本地运行，不加载远程资源。',cls:'tn-settings-intro'});
+  display(){const c=this.containerEl;c.empty();c.createEl('h2',{text:'Typewriter Prelude · 机械滑轨写作环境'});
     const p=this.plugin,s=p.settings,save=()=>p.saveSettings();
     new Setting(c).setName('启用打字机环境').setDesc('开启纸张背景、光标下方的机械滑轨和动态灯光。').addToggle(t=>t.setValue(s.enabled).onChange(async v=>{s.enabled=v;if(!v)p.audio.stopTelegraph();await save();}));
     new Setting(c).setName('纸张材质').setDesc('羊皮纸为默认暖色纸面；其他材质保留各自的颗粒、纤维、条纹与织纹。').addDropdown(d=>{for(const [k,v] of Object.entries(PAPERS))d.addOption(k,v.name);d.setValue(s.paper).onChange(async v=>{s.paper=v;await save();});});
@@ -1365,13 +1448,14 @@ class TypewriterSettingTab extends PluginSettingTab {
     new Setting(c).setName('滤镜强度').setDesc('调整所选纸面滤镜的明暗与色调幅度，可边拖动边预览。').addSlider(sl=>sl.setLimits(0,500,1).setValue(s.filterStrength).setDynamicTooltip().onChange(async v=>{s.filterStrength=v;p.applyPaperFilter();await p.saveData(s);}));
     new Setting(c).setName('环境主题').setDesc('决定纸面光色和金属滑轨色调。').addDropdown(d=>{for(const [k,v]of Object.entries(ROOMS))d.addOption(k,v.name);d.setValue(s.room).onChange(async v=>{s.room=v;await save();});});
     new Setting(c).setName('光标固定高度').setDesc('调节光标高度；默认贴近纸面打字线，且不会进入机器遮挡区。').addSlider(sl=>sl.setLimits(18,78,1).setValue(s.cursorPosition).setDynamicTooltip().onChange(async v=>{s.cursorPosition=v;await save();}));
-    new Setting(c).setName('台灯与纸面光照').setDesc('开启随光标移动的暖色聚光束、纸面渐晕及滑轨局部高光。').addToggle(t=>t.setValue(s.lighting).onChange(async v=>{s.lighting=v;await save();}));
-    new Setting(c).setName('灯光风格').setDesc('切换聚光范围和色调；光斑始终跟随当前光标。').addDropdown(d=>d.addOption('theme','跟随环境主题').addOption('carriage','字架聚光').addOption('desk-lamp','窄幅聚光').addOption('moonlight','宽幅冷光').setValue(s.lightSource).onChange(async v=>{s.lightSource=v;await save();}));
+    new Setting(c).setName('台灯与纸面光照').setDesc('开启随光标移动的暖色聚光束、纸面渐晕及滑轨局部高光。').addToggle(t=>{this.lightingToggle=t;t.setValue(s.lighting).onChange(async v=>{if(s.lighting===v)return;s.lighting=v;await save();});});
+    new Setting(c).setName('灯光风格').setDesc('切换聚光范围和色调；光斑始终跟随当前光标。').addDropdown(d=>d.addOption('theme','跟随环境主题').addOption('carriage','聚焦').addOption('desk-lamp','台灯').addOption('moonlight','窗格日影').setValue(s.lightSource).onChange(async v=>{s.lightSource=v;await save();}));
+    new Setting(c).setName('阅读模式灯光风格').setDesc('阅读模式无打字机字架，仅提供以下三种灯光效果。').addDropdown(d=>d.addOption('theme','跟随环境主题').addOption('desk-lamp','台灯').addOption('moonlight','窗格日影').setValue(s.readingLightSource).onChange(async v=>{s.readingLightSource=v;await save();}));
     new Setting(c).setName('灯光亮度').addSlider(sl=>sl.setLimits(10,100,1).setValue(s.lightIntensity).setDynamicTooltip().onChange(async v=>{s.lightIntensity=v;await save();}));
     new Setting(c).setName('浮尘粒子').setDesc('在光束中显示轻微漂浮的尘埃。').addToggle(t=>t.setValue(s.dust).onChange(async v=>{s.dust=v;await save();}));
     new Setting(c).setName('机械打字音效').setDesc('离线合成键杆敲击、滚筒回车、擒纵机构、边铃和灯光开关声。').addToggle(t=>t.setValue(s.sound).onChange(async v=>{s.sound=v;if(v)p.audio.unlock();else p.audio.stopTelegraph();await save();}));
     new Setting(c).setName('音量').addSlider(sl=>sl.setLimits(0,100,1).setValue(s.volume).setDynamicTooltip().onChange(async v=>{s.volume=v;await save();}));
-    new Setting(c).setName('打字机音色').addDropdown(d=>d.addOption('standard','标准机械').addOption('portable','便携式打字机').addOption('electric','电动打字机').addOption('whisper','轻柔敲击').addOption('telegraph','电报机').setValue(s.voice).onChange(async v=>{s.voice=v;if(v!=='telegraph')p.audio.stopTelegraph();await save();}));
+    new Setting(c).setName('打字机音色').addDropdown(d=>d.addOption('standard','标准机械').addOption('whisper','柔和机械').addOption('telegraph','电报机').addOption('portable','便携式打字机').addOption('electric','电动打字机').setValue(s.voice).onChange(async v=>{s.voice=v;if(v!=='telegraph')p.audio.stopTelegraph();await save();}));
     new Setting(c).setName('电报码速（WPM）').setDesc('仅在“打字机音色”选择“电报机”时生效（12–40 WPM）。').addSlider(sl=>sl.setLimits(12,40,1).setValue(s.telegraphWpm).setDynamicTooltip().onChange(async v=>{s.telegraphWpm=v;await save();}));
     new Setting(c).setName('连续输入打断电报音').setDesc('开启后，按下新按键会立即中止尚未播完的莫尔斯电码并播报当前按键；关闭则按顺序严格排队播放。').addToggle(t=>t.setValue(s.telegraphInterrupt).onChange(async v=>{s.telegraphInterrupt=v;if(v)p.audio.stopTelegraph();await save();}));
     new Setting(c).setName('当前行聚焦').setDesc('降低非当前行的视觉权重。').addToggle(t=>t.setValue(s.focusLine).onChange(async v=>{s.focusLine=v;await save();}));

@@ -23909,20 +23909,21 @@ var { ambientFloor, buildRig, toUnit } = require_light_model();
 var { GlowLayer } = require_glow_layer();
 var { PaperLight } = require_paper_light();
 var DEFAULT_SETTINGS = {
-  enabled: false,
+  enabled: true,
   cursorPosition: 72,
-  paper: "parchment",
+  paper: "onionskin",
   filterStyle: "clean",
-  filterStrength: 300,
+  filterStrength: 299,
   room: "paper-and-ink",
   sound: true,
-  volume: 42,
-  voice: "standard",
+  volume: 30,
+  voice: "whisper",
   telegraphWpm: 26,
   telegraphInterrupt: false,
-  lighting: true,
+  lighting: false,
   lightSource: "carriage",
-  lightIntensity: 84,
+  readingLightSource: "desk-lamp",
+  lightIntensity: 80,
   dust: true,
   focusLine: false,
   reducedMotion: false
@@ -24059,8 +24060,8 @@ var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 function setPaperFilterStyle(element, style) {
   element.dataset.filterStyle = style === "hokkaido-blue-hour" ? "hokkaido-blue-hour" : "clean";
 }
-function machineLayout(width, height) {
-  const machineHeight = clamp(height * 0.3, 160, 300);
+function machineLayout(width, height, readingMode = false) {
+  const machineHeight = readingMode ? 0 : clamp(height * 0.3, 160, 300);
   const margins = width < 720 ? 40 : 2 * clamp(width * 0.04, 18, 64);
   const narrowest = Math.round(Math.max(160, Math.min(width - margins, 1240)));
   const margin = Math.round((width - narrowest) / 2);
@@ -24070,12 +24071,12 @@ function machineLayout(width, height) {
   const sheetX = platen.left;
   const machineTop = height - machineHeight;
   const platenRadius = machineHeight * 0.12;
-  const platenY = machineTop + machineHeight * 0.24;
-  const bailY = machineTop + machineHeight * 0.08;
+  const platenY = readingMode ? height : machineTop + machineHeight * 0.24;
+  const bailY = readingMode ? height : machineTop + machineHeight * 0.08;
   return {
     width,
     height,
-    machine: true,
+    machine: !readingMode,
     machineHeight,
     machineTop,
     sheet: { x: sheetX, y: -12, width: sheetWidth, height: Math.ceil(platenY + 12) },
@@ -24086,7 +24087,7 @@ function machineLayout(width, height) {
     bailY,
     headRailY: platenY + platenRadius * 1.35,
     lampY: bailY + 12,
-    text: { x: sheetX, y: 0, width: sheetWidth, height: Math.max(80, Math.round(bailY - 16)) }
+    text: { x: sheetX, y: 0, width: sheetWidth, height: readingMode ? height : Math.max(80, Math.round(bailY - 16)) }
   };
 }
 var random = (seed) => {
@@ -24223,6 +24224,8 @@ var TypewriterNocturnePlugin = class extends Plugin {
       this.settings.cursorPosition = DEFAULT_SETTINGS.cursorPosition;
     }
     this.stages = /* @__PURE__ */ new Map();
+    this.stageCache = /* @__PURE__ */ new Map();
+    this.lampButtons = /* @__PURE__ */ new Map();
     this.frames = /* @__PURE__ */ new Set();
     this.alignmentScheduled = false;
     this.pendingCaretRecenter = false;
@@ -24234,7 +24237,8 @@ var TypewriterNocturnePlugin = class extends Plugin {
     this.addCommand({ id: "toggle-nocturne-sound", name: "\u5207\u6362\u673A\u68B0\u6253\u5B57\u97F3\u6548", callback: () => this.toggleSound() });
     this.addCommand({ id: "toggle-nocturne-focus", name: "\u5207\u6362\u5F53\u524D\u884C\u805A\u7126", callback: () => this.toggleFocus() });
     this.addCommand({ id: "nocturne-recenter-cursor", name: "\u5C06\u5149\u6807\u79FB\u56DE\u6253\u5B57\u673A\u4F4D\u7F6E", callback: () => this.scheduleCursorSync(true) });
-    this.addSettingTab(new TypewriterSettingTab(this.app, this));
+    this.settingTab = new TypewriterSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
     this.status = this.addStatusBarItem();
     this.status.addClass("tn-status-clickable");
     this.status.setAttr("aria-label", "\u5207\u6362\u6253\u5B57\u673A\u5199\u4F5C\u6A21\u5F0F");
@@ -24272,8 +24276,15 @@ var TypewriterNocturnePlugin = class extends Plugin {
   onunload() {
     for (const id of this.frames) cancelAnimationFrame(id);
     this.frames.clear();
-    for (const stage of this.stages.values()) stage.destroy();
+    for (const pair of this.stageCache.values()) {
+      if (pair.edit) pair.edit.destroy();
+      if (pair.reading) pair.reading.destroy();
+    }
+    this.stageCache.clear();
     this.stages.clear();
+    document.querySelectorAll(".tn-view-active").forEach((el) => el.classList.remove("tn-view-active"));
+    for (const btn of this.lampButtons.values()) btn.remove();
+    this.lampButtons.clear();
     this.audio.destroy();
     document.querySelectorAll(".tn-nocturne-active").forEach((el) => el.classList.remove("tn-nocturne-active", "tn-focus-line"));
   }
@@ -24281,6 +24292,9 @@ var TypewriterNocturnePlugin = class extends Plugin {
     await this.saveData(this.settings);
     this.refreshViews();
     this.updateStatus();
+    if (this.settingTab && this.settingTab.lightingToggle && this.settingTab.containerEl && this.settingTab.containerEl.isConnected) {
+      this.settingTab.lightingToggle.setValue(this.settings.lighting);
+    }
   }
   applyPaperFilter() {
     for (const stage of this.stages.values()) {
@@ -24302,7 +24316,10 @@ var TypewriterNocturnePlugin = class extends Plugin {
   }
   async toggleLamp() {
     this.settings.lighting = !this.settings.lighting;
-    this.audio.play("switch", false, this.activeStage()?.pan() || 0);
+    try {
+      this.audio.play("switch", false, this.activeStage()?.pan() || 0);
+    } catch (_) {
+    }
     await this.saveSettings();
   }
   async toggleSound() {
@@ -24337,26 +24354,68 @@ var TypewriterNocturnePlugin = class extends Plugin {
     const leaf = this.app.workspace.activeLeaf;
     return leaf ? this.stages.get(leaf) || null : null;
   }
+  syncLampButton(leaf) {
+    if (!leaf || !leaf.view || typeof leaf.view.addAction !== "function") return;
+    let btn = this.lampButtons.get(leaf);
+    if (!btn || !btn.isConnected) {
+      btn = leaf.view.addAction("lightbulb", "\u5207\u6362\u706F\u5149", () => this.toggleLamp());
+      btn.addClass("tn-lamp-action");
+      this.lampButtons.set(leaf, btn);
+    }
+    const isOn = this.settings.enabled && this.settings.lighting;
+    btn.toggleClass("is-active", isOn);
+    btn.setAttr("aria-label", isOn ? "\u5173\u95ED\u706F\u5149" : "\u5F00\u542F\u706F\u5149");
+    btn.style.display = this.settings.enabled ? "" : "none";
+  }
   refreshViews() {
     const leaves = this.getMarkdownLeaves();
     const alive = new Set(leaves);
-    for (const [leaf, stage] of this.stages) {
+    for (const [leaf, pair] of this.stageCache) {
       if (!alive.has(leaf) || !leaf.view || !leaf.view.containerEl.isConnected) {
-        stage.destroy();
+        if (pair.edit) pair.edit.destroy();
+        if (pair.reading) pair.reading.destroy();
+        this.stageCache.delete(leaf);
         this.stages.delete(leaf);
       }
     }
+    for (const [leaf, btn] of this.lampButtons) {
+      if (!alive.has(leaf) || !leaf.view || !leaf.view.containerEl.isConnected) {
+        btn.remove();
+        this.lampButtons.delete(leaf);
+      }
+    }
+    const room = ROOMS[this.settings.room] || ROOMS["paper-and-ink"];
+    const paper = PAPERS[this.settings.paper] || PAPERS.parchment;
     for (const leaf of leaves) {
       if (!leaf.view || !leaf.view.containerEl) continue;
-      const source = leaf.view.containerEl.querySelector(".markdown-source-view");
-      const editor = source && source.querySelector(".cm-editor");
-      if (!source || !editor) continue;
-      let stage = this.stages.get(leaf);
-      if (!stage || stage.source !== source || stage.editor !== editor) {
-        if (stage) stage.destroy();
-        stage = new NocturneStage(this, leaf, source, editor);
-        this.stages.set(leaf, stage);
+      this.syncLampButton(leaf);
+      const host = leaf.view.containerEl;
+      host.classList.toggle("tn-view-active", this.settings.enabled);
+      if (this.settings.enabled) {
+        host.style.setProperty("--tn-room", room.room);
+        host.style.setProperty("--tn-paper", paper.color);
+        host.style.setProperty("--tn-ink", paper.ink);
       }
+      const isReading = typeof leaf.view.getMode === "function" && leaf.view.getMode() === "preview";
+      const modeKey = isReading ? "reading" : "edit";
+      const otherKey = isReading ? "edit" : "reading";
+      let pair = this.stageCache.get(leaf);
+      if (!pair) {
+        pair = { edit: null, reading: null };
+        this.stageCache.set(leaf, pair);
+      }
+      if (pair[otherKey]) pair[otherKey].setActive(false);
+      const source = isReading ? host.querySelector(".markdown-reading-view") : host.querySelector(".markdown-source-view");
+      const editor = isReading ? source && source.querySelector(".markdown-preview-view") : source && source.querySelector(".cm-editor");
+      if (!source || !editor) continue;
+      let stage = pair[modeKey];
+      if (!stage || stage.destroyed || stage.source !== source || stage.editor !== editor) {
+        if (stage) stage.destroy();
+        stage = new NocturneStage(this, leaf, source, editor, isReading);
+        pair[modeKey] = stage;
+      }
+      stage.setActive(true);
+      this.stages.set(leaf, stage);
       stage.update(this.settings);
     }
     this.updateStatus();
@@ -24484,11 +24543,13 @@ var TypewriterNocturnePlugin = class extends Plugin {
   }
 };
 var NocturneStage = class {
-  constructor(plugin, leaf, source, editor) {
+  constructor(plugin, leaf, source, editor, isReading = false) {
     this.plugin = plugin;
     this.leaf = leaf;
     this.source = source;
     this.editor = editor;
+    this.isReading = isReading;
+    this.active = true;
     this.destroyed = false;
     this.paperCanvas = document.createElement("canvas");
     this.paperCanvas.className = "tn-paper-layer";
@@ -24512,7 +24573,8 @@ var NocturneStage = class {
     });
     this.glowLayer = new GlowLayer(this.lightCanvas);
     this.source.classList.add("tn-nocturne-active");
-    const cm = plugin.getCM(leaf.view);
+    this.source.classList.toggle("tn-reading-mode", this.isReading);
+    const cm = this.isReading ? null : plugin.getCM(leaf.view);
     this.scrollDOM = cm && cm.scrollDOM;
     this.scrollHandler = () => plugin.scheduleCursorSync(false);
     if (this.scrollDOM) this.scrollDOM.addEventListener("scroll", this.scrollHandler, { passive: true });
@@ -24520,6 +24582,23 @@ var NocturneStage = class {
     this.resizeObserver.observe(this.editor);
     this.resize();
     this.update(plugin.settings);
+  }
+  setActive(active) {
+    this.active = active;
+    if (!active) {
+      if (this.dustFrame) {
+        cancelAnimationFrame(this.dustFrame);
+        this.dustFrame = 0;
+      }
+      if (this.cursorFrame) {
+        cancelAnimationFrame(this.cursorFrame);
+        this.cursorFrame = 0;
+      }
+      if (this.railFrame) {
+        cancelAnimationFrame(this.railFrame);
+        this.railFrame = 0;
+      }
+    }
   }
   update(settings) {
     if (this.destroyed) return;
@@ -24546,8 +24625,9 @@ var NocturneStage = class {
     this.syncDustAnimation();
   }
   resize() {
-    if (this.destroyed) return;
+    if (this.destroyed || !this.active) return;
     const rect = this.editor.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return;
     const sourceRect = this.source.getBoundingClientRect();
     const offsetX = rect.left - sourceRect.left;
     const offsetY = rect.top - sourceRect.top;
@@ -24558,8 +24638,8 @@ var NocturneStage = class {
     this.renderRatio = ratio;
     for (const canvas of [this.paperCanvas, this.lightCanvas, this.railCanvas]) {
       if (canvas !== this.paperCanvas || !this.paperLight) {
-        canvas.width = w;
-        canvas.height = h;
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
       }
       canvas.style.left = `${offsetX}px`;
       canvas.style.top = `${offsetY}px`;
@@ -24574,7 +24654,7 @@ var NocturneStage = class {
     this.machineCanvas.style.bottom = "auto";
     this.machineCanvas.style.width = `${rect.width}px`;
     this.machineCanvas.style.height = `${rect.height}px`;
-    this.machineLayout = machineLayout(rect.width, rect.height);
+    this.machineLayout = machineLayout(rect.width, rect.height, this.isReading);
     this.source.style.setProperty("--tn-machine-height", `${this.machineLayout.machineHeight}px`);
     const paperLeft = clamp(this.machineLayout.sheet.x, 0, rect.width);
     const paperRight = clamp(this.machineLayout.sheet.x + this.machineLayout.sheet.width, paperLeft, rect.width);
@@ -24591,7 +24671,7 @@ var NocturneStage = class {
     this.renderRail();
   }
   configureMachine() {
-    if (!this.plugin.settings.enabled || !this.machineLayout) return;
+    if (this.isReading || !this.plugin.settings.enabled || !this.machineLayout) return;
     this.ensureMachineRenderer();
     if (!this.machineRenderer) return;
     const settings = this.plugin.settings;
@@ -24637,6 +24717,9 @@ var NocturneStage = class {
       paper: { color: paper.color, appearance: paper.dark ? "dark" : "light" },
       serif
     };
+    const machineKey = JSON.stringify(spec);
+    if (this.machineReady && this.machineSpecKey === machineKey) return;
+    this.machineSpecKey = machineKey;
     this.machineCanvas.style.visibility = "hidden";
     this.machineReady = false;
     try {
@@ -24648,7 +24731,7 @@ var NocturneStage = class {
     }
   }
   ensureMachineRenderer() {
-    if (this.machineAttempted || !this.plugin.settings.enabled) return;
+    if (this.isReading || this.machineAttempted || !this.plugin.settings.enabled) return;
     this.machineAttempted = true;
     try {
       this.machineRenderer = createMachine(this.machineCanvas, () => {
@@ -24711,11 +24794,15 @@ var NocturneStage = class {
     const filterAmount = settings.filterStyle === "hokkaido-blue-hour" ? strength / 500 : 0;
     const blueTint = toUnit("#a9c1ed");
     const lampColor = toUnit(room.lamp).map((value, index) => value * (1 - filterAmount) + blueTint[index] * filterAmount);
-    const source = settings.lightSource === "theme" ? room.source : settings.lightSource;
-    const position = settings.lightSource === "theme" ? room.position : source === "desk-lamp" ? ROOMS["midnight-study"].position : source === "moonlight" ? ROOMS["moonlit-poetry"].position : ROOMS["paper-and-ink"].position;
+    const requestedSource = this.isReading ? settings.readingLightSource || "theme" : settings.lightSource;
+    let source = requestedSource === "theme" ? room.source : requestedSource;
+    if (this.isReading && source === "carriage") source = "desk-lamp";
+    const roomFallbackSource = this.isReading && room.source === "carriage" ? "desk-lamp" : room.source;
+    const roomFallbackPosition = this.isReading && room.source === "carriage" ? ROOMS["midnight-study"].position : room.position;
+    const position = requestedSource === "theme" ? roomFallbackPosition : source === "desk-lamp" ? ROOMS["midnight-study"].position : source === "moonlight" ? ROOMS["moonlit-poetry"].position : ROOMS["paper-and-ink"].position;
     const intensity = settings.lighting ? clamp(settings.lightIntensity, 0, 100) / 100 : 0;
     const rig = buildRig({
-      source: settings.lightSource,
+      source: this.isReading ? source : requestedSource,
       position,
       intensity,
       spread: 74,
@@ -24724,7 +24811,7 @@ var NocturneStage = class {
       reach: 1,
       window: { x: 0.5, y: 0.38, columns: 3, rows: 2, slant: 0 }
     }, {
-      light: { source: room.source, position: room.position }
+      light: { source: roomFallbackSource, position: roomFallbackPosition }
     }, {
       width: rect.width,
       height: rect.height,
@@ -24743,11 +24830,12 @@ var NocturneStage = class {
       paper.dark ? 0.62 : 0.55
     );
     const shade = room.shade * strength / 300;
-    const ambient = clamp(1 - shade * (0.55 + 0.45 * intensity), floor, 1);
+    const shadeIntensity = clamp(settings.lightIntensity, 0, 100) / 100;
+    const ambient = clamp(1 - shade * (0.55 + 0.45 * shadeIntensity), floor, 1);
     const frame = {
       rig,
-      lamp: settings.enabled && settings.lighting,
-      tint: lampColor,
+      lamp: settings.enabled,
+      tint: settings.lighting ? lampColor : [0, 0, 0],
       ambient,
       ambientTint,
       relief: 1,
@@ -24788,7 +24876,7 @@ var NocturneStage = class {
       platenTurn: this.platenTurn,
       lamp: settings.enabled && settings.lighting && source === "carriage",
       lighting: settings.enabled && settings.lighting,
-      intensity: settings.lightIntensity / 100
+      intensity: settings.lighting ? settings.lightIntensity / 100 : 0
     });
   }
   renderRail() {
@@ -24799,7 +24887,10 @@ var NocturneStage = class {
     const ratio = this.renderRatio || 1;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.railCanvas.width, this.railCanvas.height);
-    if (!this.plugin.settings.enabled || width < 80 || height < 40) return;
+    if (this.isReading || !this.plugin.settings.enabled || width < 80 || height < 40) {
+      this.machineCanvas.style.visibility = "hidden";
+      return;
+    }
     if (this.machineRenderer && this.machineReady) {
       const rendered = this.renderMachine();
       this.machineCanvas.style.visibility = rendered ? "visible" : "hidden";
@@ -24972,23 +25063,26 @@ var NocturneStage = class {
     }
     ctx.fillStyle = "#8a2924";
     ctx.fillRect(carriageX - 11, y + 8, 22, 3);
-    const bulb = ctx.createRadialGradient(carriageX, bulbY, 0, carriageX, bulbY, 11 + pulse * 5);
-    bulb.addColorStop(0, "rgba(255,246,211,.95)");
-    bulb.addColorStop(0.22, `${room.lamp}d9`);
-    bulb.addColorStop(1, `${room.lamp}00`);
-    ctx.fillStyle = bulb;
-    ctx.fillRect(carriageX - 16, bulbY - 16, 32, 32);
-    ctx.fillStyle = "#fff4d0";
-    ctx.beginPath();
-    ctx.arc(carriageX, bulbY, 2.4, 0, Math.PI * 2);
-    ctx.fill();
+    if (railSettings.lighting) {
+      const bulb = ctx.createRadialGradient(carriageX, bulbY, 0, carriageX, bulbY, 11 + pulse * 5);
+      bulb.addColorStop(0, "rgba(255,246,211,.95)");
+      bulb.addColorStop(0.22, `${room.lamp}d9`);
+      bulb.addColorStop(1, `${room.lamp}00`);
+      ctx.fillStyle = bulb;
+      ctx.fillRect(carriageX - 16, bulbY - 16, 32, 32);
+      ctx.fillStyle = "#fff4d0";
+      ctx.beginPath();
+      ctx.arc(carriageX, bulbY, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
   syncDustAnimation() {
     if (this.dustFrame) cancelAnimationFrame(this.dustFrame);
     this.dustFrame = 0;
+    if (!this.active) return;
     const tick = (now) => {
-      if (this.destroyed) return;
+      if (this.destroyed || !this.active) return;
       const s2 = this.plugin.settings;
       if (!(s2.enabled && s2.lighting && s2.dust && !s2.reducedMotion)) return;
       if (!this.lastDust || now - this.lastDust > 40) {
@@ -25069,10 +25163,11 @@ var NocturneStage = class {
     if (this.cursorFrame) cancelAnimationFrame(this.cursorFrame);
     if (this.scrollDOM) this.scrollDOM.removeEventListener("scroll", this.scrollHandler);
     if (this.railFrame) cancelAnimationFrame(this.railFrame);
+    if (this.dustFrame) cancelAnimationFrame(this.dustFrame);
     if (this.machineRenderer) this.machineRenderer.dispose();
     if (this.paperLight) this.paperLight.dispose();
     for (const el of [this.paperCanvas, this.lightCanvas, this.railCanvas, this.machineCanvas]) el.remove();
-    this.source.classList.remove("tn-nocturne-active", "tn-focus-line", "tn-mode-off", "tn-paper-dark");
+    this.source.classList.remove("tn-nocturne-active", "tn-reading-mode", "tn-focus-line", "tn-mode-off", "tn-paper-dark");
     delete this.source.dataset.paper;
     delete this.source.dataset.room;
     delete this.source.dataset.filterStyle;
@@ -25554,7 +25649,6 @@ var TypewriterSettingTab = class extends PluginSettingTab {
     const c = this.containerEl;
     c.empty();
     c.createEl("h2", { text: "Typewriter Prelude \xB7 \u673A\u68B0\u6ED1\u8F68\u5199\u4F5C\u73AF\u5883" });
-    c.createEl("p", { text: "\u5C06\u7EB8\u5F20\u6750\u8D28\u3001\u5149\u6807\u8DDF\u968F\u7684\u673A\u68B0\u6ED1\u8F68\u3001\u52A8\u6001\u706F\u5149\u4E0E\u5408\u6210\u97F3\u6548\u5E26\u5165 Obsidian\u3002\u6240\u6709\u6548\u679C\u5747\u5728\u672C\u5730\u8FD0\u884C\uFF0C\u4E0D\u52A0\u8F7D\u8FDC\u7A0B\u8D44\u6E90\u3002", cls: "tn-settings-intro" });
     const p = this.plugin, s = p.settings, save = () => p.saveSettings();
     new Setting(c).setName("\u542F\u7528\u6253\u5B57\u673A\u73AF\u5883").setDesc("\u5F00\u542F\u7EB8\u5F20\u80CC\u666F\u3001\u5149\u6807\u4E0B\u65B9\u7684\u673A\u68B0\u6ED1\u8F68\u548C\u52A8\u6001\u706F\u5149\u3002").addToggle((t) => t.setValue(s.enabled).onChange(async (v) => {
       s.enabled = v;
@@ -25589,12 +25683,20 @@ var TypewriterSettingTab = class extends PluginSettingTab {
       s.cursorPosition = v;
       await save();
     }));
-    new Setting(c).setName("\u53F0\u706F\u4E0E\u7EB8\u9762\u5149\u7167").setDesc("\u5F00\u542F\u968F\u5149\u6807\u79FB\u52A8\u7684\u6696\u8272\u805A\u5149\u675F\u3001\u7EB8\u9762\u6E10\u6655\u53CA\u6ED1\u8F68\u5C40\u90E8\u9AD8\u5149\u3002").addToggle((t) => t.setValue(s.lighting).onChange(async (v) => {
-      s.lighting = v;
+    new Setting(c).setName("\u53F0\u706F\u4E0E\u7EB8\u9762\u5149\u7167").setDesc("\u5F00\u542F\u968F\u5149\u6807\u79FB\u52A8\u7684\u6696\u8272\u805A\u5149\u675F\u3001\u7EB8\u9762\u6E10\u6655\u53CA\u6ED1\u8F68\u5C40\u90E8\u9AD8\u5149\u3002").addToggle((t) => {
+      this.lightingToggle = t;
+      t.setValue(s.lighting).onChange(async (v) => {
+        if (s.lighting === v) return;
+        s.lighting = v;
+        await save();
+      });
+    });
+    new Setting(c).setName("\u706F\u5149\u98CE\u683C").setDesc("\u5207\u6362\u805A\u5149\u8303\u56F4\u548C\u8272\u8C03\uFF1B\u5149\u6591\u59CB\u7EC8\u8DDF\u968F\u5F53\u524D\u5149\u6807\u3002").addDropdown((d) => d.addOption("theme", "\u8DDF\u968F\u73AF\u5883\u4E3B\u9898").addOption("carriage", "\u805A\u7126").addOption("desk-lamp", "\u53F0\u706F").addOption("moonlight", "\u7A97\u683C\u65E5\u5F71").setValue(s.lightSource).onChange(async (v) => {
+      s.lightSource = v;
       await save();
     }));
-    new Setting(c).setName("\u706F\u5149\u98CE\u683C").setDesc("\u5207\u6362\u805A\u5149\u8303\u56F4\u548C\u8272\u8C03\uFF1B\u5149\u6591\u59CB\u7EC8\u8DDF\u968F\u5F53\u524D\u5149\u6807\u3002").addDropdown((d) => d.addOption("theme", "\u8DDF\u968F\u73AF\u5883\u4E3B\u9898").addOption("carriage", "\u5B57\u67B6\u805A\u5149").addOption("desk-lamp", "\u7A84\u5E45\u805A\u5149").addOption("moonlight", "\u5BBD\u5E45\u51B7\u5149").setValue(s.lightSource).onChange(async (v) => {
-      s.lightSource = v;
+    new Setting(c).setName("\u9605\u8BFB\u6A21\u5F0F\u706F\u5149\u98CE\u683C").setDesc("\u9605\u8BFB\u6A21\u5F0F\u65E0\u6253\u5B57\u673A\u5B57\u67B6\uFF0C\u4EC5\u63D0\u4F9B\u4EE5\u4E0B\u4E09\u79CD\u706F\u5149\u6548\u679C\u3002").addDropdown((d) => d.addOption("theme", "\u8DDF\u968F\u73AF\u5883\u4E3B\u9898").addOption("desk-lamp", "\u53F0\u706F").addOption("moonlight", "\u7A97\u683C\u65E5\u5F71").setValue(s.readingLightSource).onChange(async (v) => {
+      s.readingLightSource = v;
       await save();
     }));
     new Setting(c).setName("\u706F\u5149\u4EAE\u5EA6").addSlider((sl) => sl.setLimits(10, 100, 1).setValue(s.lightIntensity).setDynamicTooltip().onChange(async (v) => {
@@ -25615,7 +25717,7 @@ var TypewriterSettingTab = class extends PluginSettingTab {
       s.volume = v;
       await save();
     }));
-    new Setting(c).setName("\u6253\u5B57\u673A\u97F3\u8272").addDropdown((d) => d.addOption("standard", "\u6807\u51C6\u673A\u68B0").addOption("portable", "\u4FBF\u643A\u5F0F\u6253\u5B57\u673A").addOption("electric", "\u7535\u52A8\u6253\u5B57\u673A").addOption("whisper", "\u8F7B\u67D4\u6572\u51FB").addOption("telegraph", "\u7535\u62A5\u673A").setValue(s.voice).onChange(async (v) => {
+    new Setting(c).setName("\u6253\u5B57\u673A\u97F3\u8272").addDropdown((d) => d.addOption("standard", "\u6807\u51C6\u673A\u68B0").addOption("whisper", "\u67D4\u548C\u673A\u68B0").addOption("telegraph", "\u7535\u62A5\u673A").addOption("portable", "\u4FBF\u643A\u5F0F\u6253\u5B57\u673A").addOption("electric", "\u7535\u52A8\u6253\u5B57\u673A").setValue(s.voice).onChange(async (v) => {
       s.voice = v;
       if (v !== "telegraph") p.audio.stopTelegraph();
       await save();

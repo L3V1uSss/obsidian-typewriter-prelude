@@ -24,6 +24,9 @@
 
 ### 安装与使用
 
+#### 1 .插件市场
+前往插件市场搜索“typewriter-prelude”下载安装。
+#### 2.手动安装
 <img width="675" height="581" alt="image" src="https://github.com/user-attachments/assets/205b0070-2de4-40ab-a997-ce35821fd42d" />
 
 下载源代码zip，解压后放入 `<你的库>/.obsidian/plugins/`，在 Obsidian 第三方插件中启用后，进入设置开启打字机环境即可。支持通过命令或快捷键切换打字机写作模式、滑轨动态灯光、机械打字音效、当前行聚焦，以及将光标移回打字机位置。

@@ -18,7 +18,9 @@
 
 ### 安装与使用
 
-将 `typewriter-prelude` 放入 `<你的库>/.obsidian/plugins/`，在 Obsidian 第三方插件中启用后，进入设置开启打字机环境即可。支持通过命令或快捷键切换打字机写作模式、滑轨动态灯光、机械打字音效、当前行聚焦，以及将光标移回打字机位置。
+<img width="675" height="581" alt="image" src="https://github.com/user-attachments/assets/205b0070-2de4-40ab-a997-ce35821fd42d" />
+
+下载源代码zip，解压后放入 `<你的库>/.obsidian/plugins/`，在 Obsidian 第三方插件中启用后，进入设置开启打字机环境即可。支持通过命令或快捷键切换打字机写作模式、滑轨动态灯光、机械打字音效、当前行聚焦，以及将光标移回打字机位置。
 
 ### 致谢与授权
 
@@ -41,8 +43,9 @@ This version is a native adaptation for Obsidian and CodeMirror 6. It does not r
 - Synthesized key clicks, platen thumps, metallic ring, carriage return, and margin bell with room response and stereo panning; immediate IME keystroke audio without duplicate Space triggers; plus a vintage telegraph sound effect[cite: 9]
 
 ### Installation & Usage
+<img width="675" height="581" alt="image" src="https://github.com/user-attachments/assets/205b0070-2de4-40ab-a997-ce35821fd42d" />
 
-Place `typewriter-prelude` into `<Vault>/.obsidian/plugins/`, enable it in Community plugins, and turn on the writing environment in its settings. Commands and hotkeys can toggle typewriter mode, rail lighting, typing sounds, focus current line, and recenter the cursor[cite: 9].
+Download the source code ZIP, extract it into `<Your Vault>/.obsidian/plugins/`, enable it under Obsidian's Community plugins, and then turn on the typewriter environment in its settings. You can use commands or hotkeys to toggle typewriter writing mode, rail dynamic lighting, mechanical typing sounds, and focus current line, as well as move the cursor back to the typewriter position.
 
 ### Attribution & License
 

@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "cursorPosition": 72,
+  "paper": "linen",
+  "filterStyle": "clean",
+  "filterStrength": 318,
+  "room": "paper-and-ink",
+  "sound": true,
+  "volume": 23,
+  "voice": "telegraph",
+  "telegraphWpm": 26,
+  "telegraphInterrupt": false,
+  "lighting": true,
+  "lightSource": "carriage",
+  "lightIntensity": 98,
+  "dust": true,
+  "focusLine": false,
+  "reducedMotion": false
+}

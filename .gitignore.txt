@@ -1,0 +1,5 @@
+node_modules/
+data.json
+machine-bundle.js
+.DS_Store
+Thumbs.db

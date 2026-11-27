@@ -1,0 +1,15 @@
+{
+  "name": "typewriter-prelude-obsidian",
+  "version": "1.0",
+  "private": true,
+  "scripts": {
+    "build:machine": "esbuild src/machine/entry.js --bundle --platform=browser --format=cjs --target=es2020 --legal-comments=inline --outfile=machine-bundle.js",
+    "build:plugin": "npm run build:machine && esbuild src/plugin-main.js --bundle --platform=node --format=cjs --target=es2020 --external:obsidian --legal-comments=inline --outfile=main.js"
+  },
+  "dependencies": {
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.0"
+  }
+}

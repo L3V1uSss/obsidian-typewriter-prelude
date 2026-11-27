@@ -1,0 +1,160 @@
+/* Typewriter Nocturne for Obsidian — independent editor adaptation.
+   Paper and room layers are generated locally; no remote images, fonts or audio are requested. */
+
+.markdown-source-view.tn-nocturne-active {
+  position: relative;
+  isolation: isolate;
+  --tn-paper: #f2f1ea;
+  --tn-ink: #29231d;
+  --tn-accent: #9b7540;
+  --tn-light-color: #ffd29a;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) {
+  background: transparent !important;
+  color: var(--tn-ink) !important;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off)[data-paper="parchment"] {
+  background-color: var(--tn-paper) !important;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-editor {
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
+  background: linear-gradient(
+    to right,
+    transparent 0,
+    transparent var(--tn-editor-paper-left, 0px),
+    var(--tn-paper) var(--tn-editor-paper-left, 0px),
+    var(--tn-paper) var(--tn-editor-paper-right, 100%),
+    transparent var(--tn-editor-paper-right, 100%)
+  ) !important;
+  color: var(--tn-ink) !important;
+  overflow: visible;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-editor::after {
+  position: absolute;
+  z-index: 10;
+  right: calc(100% - var(--tn-editor-paper-right, 100%));
+  bottom: 0;
+  left: var(--tn-editor-paper-left, 0px);
+  height: calc(100% - var(--tn-paper-text-height, 100%));
+  content: "";
+  background: linear-gradient(
+    to bottom,
+    var(--tn-paper) 0,
+    var(--tn-paper) var(--tn-paper-tail-height, 0px),
+    var(--tn-room) var(--tn-paper-tail-height, 0px),
+    var(--tn-room) 100%
+  );
+  pointer-events: none;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-scroller {
+  position: relative;
+  background: transparent !important;
+  scrollbar-color: color-mix(in srgb, var(--tn-ink) 30%, transparent) transparent;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-content,
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-gutters,
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-line {
+  background: transparent !important;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-content {
+  color: var(--tn-ink) !important;
+  padding-bottom: max(2.5rem, calc(var(--tn-machine-height, 0px) + 1rem)) !important;
+  caret-color: var(--tn-ink) !important;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-gutters {
+  color: color-mix(in srgb, var(--tn-ink) 48%, transparent) !important;
+  border-right: 1px solid color-mix(in srgb, var(--tn-ink) 13%, transparent) !important;
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-activeLine {
+  background: color-mix(in srgb, var(--tn-accent) 7%, transparent) !important;
+  border-radius: 2px;
+}
+
+.markdown-source-view.tn-nocturne-active .cm-cursor,
+.markdown-source-view.tn-nocturne-active .cm-dropCursor {
+  border-left: 2px solid var(--tn-ink) !important;
+  margin-left: -1px;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, var(--tn-ink) 38%, transparent));
+}
+
+.markdown-source-view.tn-nocturne-active .cm-cursor {
+  border-radius: 60% 24% 42% 18%;
+}
+
+.markdown-source-view.tn-nocturne-active .cm-cursor::after {
+  position: absolute;
+  left: -2px;
+  bottom: -1px;
+  width: 4px;
+  height: 5px;
+  content: "";
+  background: var(--tn-ink);
+  border-radius: 55% 35% 65% 30%;
+  box-shadow: 0 0 2px color-mix(in srgb, var(--tn-ink) 46%, transparent);
+  transform: rotate(12deg);
+}
+
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-selectionBackground,
+.markdown-source-view.tn-nocturne-active:not(.tn-mode-off) .cm-content ::selection {
+  background: color-mix(in srgb, var(--tn-accent) 22%, transparent) !important;
+}
+
+/* Paper lighting multiplies the rendered page; the separate glow layer adds restrained light. */
+.tn-paper-layer,
+.tn-light-layer,
+.tn-rail-layer,
+.tn-machine-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+.tn-paper-layer { z-index: 3; mix-blend-mode: multiply; }
+.tn-light-layer { z-index: 4; mix-blend-mode: screen; }
+.tn-rail-layer,
+.tn-machine-layer { z-index: 5; }
+
+.markdown-source-view.tn-mode-off .tn-paper-layer,
+.markdown-source-view.tn-mode-off .tn-light-layer,
+.markdown-source-view.tn-mode-off .tn-rail-layer,
+.markdown-source-view.tn-mode-off .tn-machine-layer { display: none; }
+
+/* Current-line focus remains restrained so adjacent prose can still be read. */
+.markdown-source-view.tn-focus-line:not(.tn-mode-off) .cm-content > .cm-line {
+  opacity: .56;
+  transition: opacity 150ms ease;
+}
+.markdown-source-view.tn-focus-line:not(.tn-mode-off) .cm-content > .cm-line.cm-activeLine {
+  opacity: 1;
+  background: color-mix(in srgb, var(--tn-accent) 10%, transparent) !important;
+}
+
+/* Paper palettes. */
+.markdown-source-view.tn-nocturne-active[data-paper="onionskin"] { --tn-paper: #f2f1ea; --tn-ink: #29231d; --tn-accent: #9b7540; }
+.markdown-source-view.tn-nocturne-active[data-paper="cotton"] { --tn-paper: #eee6d5; --tn-ink: #2a2019; --tn-accent: #a77b3e; }
+.markdown-source-view.tn-nocturne-active[data-paper="laid"] { --tn-paper: #f1e9d6; --tn-ink: #2b231c; --tn-accent: #96703b; }
+.markdown-source-view.tn-nocturne-active[data-paper="linen"] { --tn-paper: #ebe5d8; --tn-ink: #2a211b; --tn-accent: #927044; }
+.markdown-source-view.tn-nocturne-active[data-paper="parchment"] { --tn-paper: #efdfbd; --tn-ink: #30251a; --tn-accent: #946a35; }
+.markdown-source-view.tn-nocturne-active[data-paper="night"] { --tn-paper: #1d1a20; --tn-ink: #e6e1ea; --tn-accent: #c5b9e8; }
+
+.tn-status-clickable { cursor: pointer; user-select: none; }
+.tn-status-clickable:hover, .tn-status-clickable.is-active { color: var(--text-accent); }
+.tn-settings-intro, .tn-settings-footnote { color: var(--text-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .markdown-source-view.tn-focus-line .cm-content > .cm-line { transition: none !important; }
+}

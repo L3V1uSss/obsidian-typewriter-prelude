@@ -1,0 +1,9 @@
+{
+  "id": "typewriter-prelude",
+  "name": "Typewriter Prelude",
+  "version": "1.0",
+  "minAppVersion": "1.5.0",
+  "description": "A typewriter-inspired writing environment for Obsidian with a live 3D machine model, procedural paper, synthesized sounds and dynamic light.",
+  "author": "Lev1uS",
+  "isDesktopOnly": true
+}

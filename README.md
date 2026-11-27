@@ -16,6 +16,12 @@
 - 细墨线光标紧贴打字线居中滚动，支持当前行聚焦与减少动画
 - 合成字杆点击、滚筒敲击、金属共鸣、回车滑动与边铃音效，带房间混响与声像随动；中文输入法组合击键即时发声且空格选词不重复触发；新增复古电报机音色。
 
+### 部分截图
+  <img width="955" height="1057" alt="屏幕截图 2026-11-27 185320" src="https://github.com/user-attachments/assets/2187b903-7f81-49df-af4d-c8376007158b" />
+  <img width="947" height="1062" alt="屏幕截图 2026-11-27 185443" src="https://github.com/user-attachments/assets/7a099aef-2a93-40aa-8fd1-496d3a92e265" />
+  <img width="945" height="1072" alt="屏幕截图 2026-11-27 185525" src="https://github.com/user-attachments/assets/5b195da3-e0e5-4947-a7ff-19640de98561" />
+
+
 ### 安装与使用
 
 <img width="675" height="581" alt="image" src="https://github.com/user-attachments/assets/205b0070-2de4-40ab-a997-ce35821fd42d" />
@@ -41,6 +47,12 @@ This version is a native adaptation for Obsidian and CodeMirror 6. It does not r
 - A mechanical carriage assembly featuring platen and curled paper, guide rods, rack, ribbon, carriage lamp, and a silver-foil `PRELUDE` badge that reacts to keystrokes and tracks the caret horizontally
 - A narrow ink-style caret centered near the typing line, with optional current-line focus and reduced motion
 - Synthesized key clicks, platen thumps, metallic ring, carriage return, and margin bell with room response and stereo panning; immediate IME keystroke audio without duplicate Space triggers; plus a vintage telegraph sound effect[cite: 9]
+
+### ScreenShots
+  <img width="955" height="1057" alt="屏幕截图 2026-11-27 185320" src="https://github.com/user-attachments/assets/2187b903-7f81-49df-af4d-c8376007158b" />
+  <img width="947" height="1062" alt="屏幕截图 2026-11-27 185443" src="https://github.com/user-attachments/assets/7a099aef-2a93-40aa-8fd1-496d3a92e265" />
+  <img width="945" height="1072" alt="屏幕截图 2026-11-27 185525" src="https://github.com/user-attachments/assets/5b195da3-e0e5-4947-a7ff-19640de98561" />
+
 
 ### Installation & Usage
 <img width="675" height="581" alt="image" src="https://github.com/user-attachments/assets/205b0070-2de4-40ab-a997-ce35821fd42d" />
